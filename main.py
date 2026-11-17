@@ -20,8 +20,8 @@ def post(path, body):
     try:
         with urllib.request.urlopen(req) as res:
             return json.load(res)
-    except urllib.error.HTTPError as e:
-        sys.exit(f"{path}: HTTP {e.code} {e.read().decode(errors='replace')}")
+    except Exception as e:
+        return {"error": str(e)}
 
 
 def board_of(fen):
@@ -71,7 +71,6 @@ def pawn_attacks(board, sq, by_white):
 
 
 def king_safety(board, color):
-    """Penalty if the king's square is attacked by an enemy pawn (cheap, correct enough)."""
     king = "K" if color == "w" else "k"
     ksq = None
     for sq, pc in board.items():
@@ -88,33 +87,55 @@ def choose(fen, legal):
     wtm = fen.split()[1] == "w"
 
     def score(move):
-        b2 = apply(board, move)
-        s = eval_board(b2, wtm)
-        victim = board.get(move[2:4])
-        if victim:
-            s += VALUE[victim.lower()] * 10
-        if pawn_attacks(b2, move[2:4], not wtm):
-            s -= 3
-        if len(move) == 5:
-            s += VALUE[move[4]] * 5
-        s -= king_safety(b2, "w" if wtm else "b")
-        return s
+        try:
+            b2 = apply(board, move)
+            s = eval_board(b2, wtm)
+            victim = board.get(move[2:4])
+            if victim:
+                s += VALUE[victim.lower()] * 10
+            if pawn_attacks(b2, move[2:4], not wtm):
+                s -= 3
+            if len(move) == 5:
+                s += VALUE[move[4]] * 5
+            return s
+        except Exception:
+            return -999999
 
     best = None
-    bs = -99999
+    bs = -999999999
     for m in legal:
-        s = score(m)
+        try:
+            s = score(m)
+        except Exception:
+            continue
         if s > bs:
             bs = s
             best = m
-    return best
+    if best is not None:
+        return best
+    return legal[0] if legal else None
 
 
 while True:
-    g = post("/game", {})
-    if g["status"] == "done":
+    try:
+        g = post("/game", {})
+        if not isinstance(g, dict) or g.get("error"):
+            break
+        if g["status"] == "done":
+            break
+        while g["status"] == "your_move":
+            try:
+                move = choose(g["fen"], g["legal_moves"])
+                if move is None:
+                    g = post("/resign", {"game": g["game"]})
+                    break
+                g = post("/move", {"game": g["game"], "move": move})
+                if not isinstance(g, dict) or g.get("error"):
+                    break
+            except Exception:
+                g = post("/resign", {"game": g["game"]})
+                break
+        print(f"game {g.get('game', '?')}: {g.get('outcome', '?')} by {g.get('reason', '?')}", file=sys.stderr)
+    except Exception:
         break
-    while g["status"] == "your_move":
-        g = post("/move", {"game": g["game"], "move": choose(g["fen"], g["legal_moves"])})
-    print(f"game {g['game']}: {g['outcome']} by {g['reason']}", file=sys.stderr)
-print(f"done: {g.get('wins')} won, {g.get('draws')} drawn, {g.get('losses')} lost", file=sys.stderr)
+print(f"done: {g.get('wins', 0)} won, {g.get('draws', 0)} drawn, {g.get('losses', 0)} lost", file=sys.stderr)
