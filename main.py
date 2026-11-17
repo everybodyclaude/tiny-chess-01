@@ -8,6 +8,7 @@ ENV_URL = os.environ.get("MAKEFUN_ENV_URL") or sys.exit("MAKEFUN_ENV_URL is not 
 
 VALUE = {"p": 1, "n": 3, "b": 3, "r": 5, "q": 9, "k": 0}
 FILES = "abcdefgh"
+CENTER = ("d4", "d5", "e4", "e5")
 
 
 def post(path, body):
@@ -50,7 +51,7 @@ def eval_board(board, white_to_move):
     for sq, pc in board.items():
         v = VALUE[pc.lower()]
         sign = 1 if pc.isupper() else -1
-        if sq in ("d4", "d5", "e4", "e5"):
+        if sq in CENTER:
             v += 1
         score += sign * v
     return score if white_to_move else -score
@@ -69,6 +70,19 @@ def pawn_attacks(board, sq, by_white):
     return False
 
 
+def king_safety(board, color):
+    """Penalty if the king's square is attacked by an enemy pawn (cheap, correct enough)."""
+    king = "K" if color == "w" else "k"
+    ksq = None
+    for sq, pc in board.items():
+        if pc == king:
+            ksq = sq
+            break
+    if not ksq:
+        return 0
+    return 2 if pawn_attacks(board, ksq, color != "w") else 0
+
+
 def choose(fen, legal):
     board = board_of(fen)
     wtm = fen.split()[1] == "w"
@@ -83,6 +97,7 @@ def choose(fen, legal):
             s -= 3
         if len(move) == 5:
             s += VALUE[move[4]] * 5
+        s -= king_safety(b2, "w" if wtm else "b")
         return s
 
     best = None
